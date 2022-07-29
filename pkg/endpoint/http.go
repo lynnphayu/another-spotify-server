@@ -12,6 +12,7 @@ import (
 	"utilserver/pkg/spotify"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/gorilla/mux"
 )
 
@@ -40,37 +41,64 @@ func Handler(spotifyAuthService spotify.AuthService) http.Handler {
 	return r
 }
 
+// get spotify login url from environment variables, parse url and redirect to that url
+func redirectToSpotifyLogin(w http.ResponseWriter, r *http.Request) {
+	parm := url.Values{}
+	base, err := url.Parse(os.Getenv("SPOTIFY_LOGIN_ENDPOINT"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	parm.Add("client_id", os.Getenv("CLIENT_ID"))
+	parm.Add("scope", os.Getenv("SCOPES"))
+	parm.Add("response_type", "code")
+	parm.Add("redirect_uri", os.Getenv("REDIRECT_URL"))
+	base.RawQuery = parm.Encode()
+	// change base to string and print
+	baseString := base.String()
+	fmt.Println(baseString)
+	http.Redirect(w, r, base.String(), http.StatusTemporaryRedirect)
+}
+
+// verify jwt token and extract email from token
+func verifyToken(w http.ResponseWriter, r *http.Request) string {
+	token := r.URL.Query().Get("token")
+	// if token is empty, goto Redirect
+	if token == "" {
+		redirectToSpotifyLogin(w, r)
+	}
+	tokenClaims := jwt.MapClaims{}
+	_, err := jwt.ParseWithClaims(token, tokenClaims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("SECRET")), nil
+	})
+	// print claim
+	if err != nil {
+		redirectToSpotifyLogin(w, r)
+	}
+	if _, ok := tokenClaims["email"]; !ok {
+		redirectToSpotifyLogin(w, r)
+	}
+	return tokenClaims["email"].(string)
+}
+
 func login(authService spotify.AuthService) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		base, err := url.Parse(os.Getenv("SPOTIFY_LOGIN_ENDPOINT"))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		// verify token and go to Redirect
+		email := verifyToken(w, r)
+		profile, profileErr := authService.Login(email)
+		if profile == nil {
+			redirectToSpotifyLogin(w, r)
 		}
-		email := r.URL.Query().Get("email")
-		if email != "" {
-			profile, profileErr := authService.Login(email)
-			if profile == nil {
-				goto Redirect
-			}
-			if profileErr != nil {
-				http.Error(w, profileErr.Error(), http.StatusInternalServerError)
-			}
-			profileByteArr, marshallingErr := json.Marshal(profile)
-			if marshallingErr != nil {
-				http.Error(w, marshallingErr.Error(), http.StatusInternalServerError)
-			}
-			w.Write(profileByteArr)
+		if profileErr != nil {
+			http.Error(w, profileErr.Error(), http.StatusInternalServerError)
 			return
 		}
-	Redirect:
-		parm := url.Values{}
-		parm.Add("client_id", os.Getenv("CLIENT_ID"))
-		parm.Add("scope", os.Getenv("SCOPES"))
-		parm.Add("response_type", "code")
-		parm.Add("redirect_uri", os.Getenv("REDIRECT_URL"))
-		base.RawQuery = parm.Encode()
-
-		http.Redirect(w, r, base.String(), http.StatusTemporaryRedirect)
+		profileByteArr, marshallingErr := json.Marshal(profile)
+		if marshallingErr != nil {
+			http.Error(w, marshallingErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write(profileByteArr)
 	}
 }
 
@@ -103,8 +131,9 @@ func loginCallback(authService spotify.AuthService) func(w http.ResponseWriter, 
 func getRecentlyPlayed(authService spotify.AuthService) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		email := verifyToken(w, r)
 		var query RecentlyPlayedQurey = RecentlyPlayedQurey{
-			Email:  r.URL.Query().Get("email"),
+			Email:  email,
 			Before: r.URL.Query().Get("before"),
 			After:  r.URL.Query().Get("after"),
 		}
@@ -144,8 +173,8 @@ func getRecentlyPlayed(authService spotify.AuthService) func(w http.ResponseWrit
 
 func getAudioFeatures(authService spotify.AuthService) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		email := verifyToken(w, r)
 		trackIDs := r.URL.Query().Get("ids")
-		email := r.URL.Query().Get("email")
 		trackIDsArray := strings.Split(trackIDs, ",")
 		resp, err := authService.GetTracksAudioFeatures(email, trackIDsArray)
 		if err != nil {
@@ -158,7 +187,7 @@ func getAudioFeatures(authService spotify.AuthService) func(w http.ResponseWrite
 
 func getTops(authService spotify.AuthService) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		email := r.URL.Query().Get("email")
+		email := verifyToken(w, r)
 		limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 		if err != nil {
 			limit = 10

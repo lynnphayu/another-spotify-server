@@ -17,7 +17,7 @@ type HTTPClient interface {
 // AuthService - functions implemented
 type AuthService interface {
 	Login(email string) (*Profile, error)
-	AuthCallback(authorizationCode string) (*Profile, error)
+	AuthCallback(authorizationCode string) (*map[string]interface{}, error)
 	GetCredentials(authorizationCode string) (*Credentials, error)
 	GetProfile(accessToken string) (*Profile, error)
 	GetRecentlyPlayed(email string, limit int, before string, after string) (*[]byte, error)

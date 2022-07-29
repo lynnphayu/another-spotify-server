@@ -30,6 +30,6 @@ func main() {
 
 	router := endpoint.Handler(spotifyAuthService)
 
-	fmt.Printf("Starting server at port 8080\n")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	fmt.Printf("Starting server at port 8090\n")
+	log.Fatal(http.ListenAndServe(":8090", router))
 }

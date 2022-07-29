@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"os"
 	"time"
+
+	"github.com/golang-jwt/jwt/v4"
 )
 
 // Login - login logic
@@ -38,7 +40,6 @@ func (service *Service) GetCredentials(authorizationCode string) (*Credentials, 
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(string(returnBody))
 	var credentials Credentials
 	json.Unmarshal(returnBody, &credentials)
 	return &credentials, nil
@@ -68,7 +69,7 @@ func (service *Service) GetProfile(accessToken string) (*Profile, error) {
 }
 
 // AuthCallback - callback function when spotify hit the  authorization endpoint
-func (service *Service) AuthCallback(authorizationCode string) (*Profile, error) {
+func (service *Service) AuthCallback(authorizationCode string) (*map[string]interface{}, error) {
 	credentials, err := service.GetCredentials(authorizationCode)
 
 	if err != nil {
@@ -85,11 +86,19 @@ func (service *Service) AuthCallback(authorizationCode string) (*Profile, error)
 	if createError != nil {
 		return nil, createError
 	}
-	// respose := map[string]interface{}{
-	// 	profile: profileArtifact,
-	// 	token:
-	// }
-	return profileArtifact, nil
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"email": profile.Email,
+	})
+	tokenString, signedErr := token.SignedString([]byte(os.Getenv("SECRET")))
+
+	if err != nil {
+		return nil, signedErr
+	}
+	respose := map[string]interface{}{
+		"profile": profileArtifact,
+		"token":   tokenString,
+	}
+	return &respose, nil
 }
 
 // GetValidToken - return credentials with valid token meaning if token is expred, token will be refreshed
