@@ -2,7 +2,6 @@ package clients
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -56,7 +55,6 @@ func (client *HTTPClient) getClient(sec int) *http.Client {
 
 // Request - http request with parameters and return http response from endpoint
 func (client *HTTPClient) Request(methodType string, URL string, body map[string]interface{}, contentType string, auth string) (*http.Response, error) {
-	fmt.Print(URL)
 	request, err := client.constructRequest(methodType, URL, body, contentType, auth)
 	if err != nil {
 		return nil, err

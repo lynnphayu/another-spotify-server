@@ -6,7 +6,7 @@ import (
 )
 
 func (service *Service) GetTracksAudioFeatures(email string, trackIDs []string) (*[]byte, error) {
-	profile, err := service.repository.GetProfileWithEmail(email)
+	profile, err := service.storage.GetProfileWithEmail(email)
 	if err != nil {
 		return nil, err
 	}

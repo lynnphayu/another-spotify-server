@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"time"
@@ -14,7 +13,7 @@ import (
 
 // Login - login logic
 func (service *Service) Login(email string) (*Profile, error) {
-	profile, profileErr := service.repository.GetProfileWithEmail(email)
+	profile, profileErr := service.storage.GetProfileWithEmail(email)
 	return profile, profileErr
 }
 
@@ -69,7 +68,7 @@ func (service *Service) GetProfile(accessToken string) (*Profile, error) {
 }
 
 // AuthCallback - callback function when spotify hit the  authorization endpoint
-func (service *Service) AuthCallback(authorizationCode string) (*map[string]interface{}, error) {
+func (service *Service) AuthCallback(authorizationCode string) (*LoginResponse, error) {
 	credentials, err := service.GetCredentials(authorizationCode)
 
 	if err != nil {
@@ -82,7 +81,7 @@ func (service *Service) AuthCallback(authorizationCode string) (*map[string]inte
 	}
 
 	profile.Credentials = *credentials
-	profileArtifact, createError := service.repository.CreateOrUpdateProfile(*profile)
+	profileArtifact, createError := service.storage.CreateOrUpdateProfile(*profile)
 	if createError != nil {
 		return nil, createError
 	}
@@ -94,9 +93,9 @@ func (service *Service) AuthCallback(authorizationCode string) (*map[string]inte
 	if err != nil {
 		return nil, signedErr
 	}
-	respose := map[string]interface{}{
-		"profile": profileArtifact,
-		"token":   tokenString,
+	respose := LoginResponse{
+		Profile: profileArtifact,
+		Token:   tokenString,
 	}
 	return &respose, nil
 }
@@ -106,7 +105,7 @@ func (service *Service) GetValidToken(email string) (*Credentials, error) {
 	if email == "" {
 		return nil, errors.New("email expected")
 	}
-	profile, err := service.repository.GetProfileWithEmail(email)
+	profile, err := service.storage.GetProfileWithEmail(email)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +118,7 @@ func (service *Service) GetValidToken(email string) (*Credentials, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, updateErr := service.repository.UpdateCredentials(email, refreshCredentials)
+		_, updateErr := service.storage.UpdateCredentials(email, refreshCredentials)
 		if updateErr != nil {
 			return nil, updateErr
 		}
@@ -153,6 +152,5 @@ func (service *Service) RefreshToken(refreshToken string) (*Credentials, error) 
 
 	var refreshTokenPayload Credentials
 	json.Unmarshal(refreshTokenResp, &refreshTokenPayload)
-	fmt.Println(string(refreshTokenResp))
 	return &refreshTokenPayload, nil
 }

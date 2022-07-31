@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"os"
 	"sync"
 	"time"
 	"utilserver/pkg/spotify"
@@ -22,9 +21,9 @@ type Storage struct {
 }
 
 // New - initialize Storage instance
-func New() (*Storage, error) {
+func NewStorage(connectionString string, databaseName string) (*Storage, error) {
 	storage := new(Storage)
-	clientOptions := options.Client().ApplyURI(os.Getenv("MONGODB_CONNECTION_STRING"))
+	clientOptions := options.Client().ApplyURI(connectionString)
 	// Connect to MongoDB
 	client, err := mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
@@ -35,7 +34,7 @@ func New() (*Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	database := client.Database(os.Getenv("MONGODB_DATABASE"))
+	database := client.Database(databaseName)
 	storage.database = database
 	storage.client = client
 	return storage, nil
@@ -64,7 +63,7 @@ func (storage *Storage) GetDBClient(CONNECTIONSTRING string) (*mongo.Client, err
 
 func (storage *Storage) GetProfileWithEmail(email string) (*spotify.Profile, error) {
 	var profile spotify.Profile
-	collection := storage.database.Collection(os.Getenv("MONGODB_PROFILE_COLLECTION"))
+	collection := storage.database.Collection("spotify-profile")
 	findErr := collection.FindOne(context.TODO(), map[string]string{"email": email}).Decode(&profile)
 	if findErr != nil {
 		if findErr == mongo.ErrNoDocuments {
@@ -78,7 +77,7 @@ func (storage *Storage) GetProfileWithEmail(email string) (*spotify.Profile, err
 // CreateProfile - create profile func
 func (storage *Storage) CreateOrUpdateProfile(profile spotify.Profile) (*spotify.Profile, error) {
 	var profileContainer spotify.Profile
-	collection := storage.database.Collection(os.Getenv("MONGODB_PROFILE_COLLECTION"))
+	collection := storage.database.Collection("spotify-profile")
 	err := collection.FindOne(context.TODO(), map[string]string{"email": profile.Email}).Decode(&profileContainer)
 	if err != mongo.ErrNoDocuments {
 		profile.Credentials.UpdatedAt = time.Now()
@@ -103,7 +102,7 @@ func (storage *Storage) CreateOrUpdateProfile(profile spotify.Profile) (*spotify
 
 func (storage *Storage) UpdateCredentials(email string, credentials *spotify.Credentials) (*spotify.Profile, error) {
 	var profileContainer spotify.Profile
-	collection := storage.database.Collection(os.Getenv("MONGODB_PROFILE_COLLECTION"))
+	collection := storage.database.Collection("spotify-profile")
 	updateParams := map[string]interface{}{
 		"updated_at":               time.Now(),
 		"credentials.access_token": credentials.AccessToken,
