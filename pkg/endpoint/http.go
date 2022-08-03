@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -55,14 +56,14 @@ func NewHandler(cache spotify.Cache, services spotify.Services) http.Handler {
 	r := mux.NewRouter()
 	api := r.PathPrefix("/api/v1").Subrouter()
 
-	api.Handle("/spotify/login", attachMiddleware(handler.login(), handler.authMiddleware)).Methods(http.MethodGet)
+	api.Handle("/spotify/login", handler.login()).Methods(http.MethodGet)
 	api.Handle("/spotify/callback", handler.loginCallback()).Methods(http.MethodGet)
-	// profile endpoint 
-	api.Handle("/profile", attachMiddleware(handler.(), handler.authMiddleware)).Methods(http.MethodGet)
-
+	api.Handle("/spotify/profile", attachMiddleware(handler.getProfile(), handler.authMiddleware)).Methods(http.MethodGet)
 	api.Handle("/spotify/recently_played", attachMiddleware(handler.getRecentlyPlayed(), handler.authMiddleware)).Methods(http.MethodGet)
-	api.Handle("/spotify/audio_features", attachMiddleware(handler.getAudioFeatures(), handler.authMiddleware)).Methods(http.MethodGet)
+	// api.Handle("/spotify/audio_features", attachMiddleware(handler.getAudioFeatures(), handler.authMiddleware)).Methods(http.MethodGet)
 	api.Handle("/spotify/top", attachMiddleware(handler.getTops(), handler.authMiddleware)).Methods(http.MethodGet)
+	api.Handle("/spotify/playlists", attachMiddleware(handler.getPlaylists(), handler.authMiddleware)).Methods(http.MethodGet)
+	api.Handle("/spotify/audio_features", attachMiddleware(handler.getPersonalAudioFeatures(), handler.authMiddleware)).Methods(http.MethodGet)
 	return r
 }
 
@@ -81,22 +82,17 @@ func (handler Handler) authMiddleware(next http.Handler) http.Handler {
 		}
 		claim, err := verifyToken(token)
 		if err != nil {
-			handler.redirectToSpotifyLogin(w, r)
+			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
-		if _, ok := (*claim)["email"]; !ok {
-			handler.redirectToSpotifyLogin(w, r)
+		if claim.Email == "" {
+			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
-		if (*claim)["email"] == nil {
-			handler.redirectToSpotifyLogin(w, r)
-			return
-		}
-		r.Header.Set("email", (*claim)["email"].(string))
+		r.Header.Set("email", claim.Email)
 		next.ServeHTTP(w, r)
 	})
 }
-
 
 // get spotify login url from environment variables, parse url and redirect to that url
 func (handler Handler) redirectToSpotifyLogin(w http.ResponseWriter, r *http.Request) {
@@ -104,12 +100,14 @@ func (handler Handler) redirectToSpotifyLogin(w http.ResponseWriter, r *http.Req
 	base, err := url.Parse(os.Getenv("SPOTIFY_LOGIN_ENDPOINT"))
 	// get redirect from query params and set it to cache if it isn't empty
 	redirect := r.URL.Query().Get("redirect")
+
+	id := shortuuid.New()
+
+	parm.Add("state", id)
+	// set state to cookie
+	setCookie(&w, os.Getenv("SPOTIFY_LOGIN_STATE_KEY"), id)
 	if redirect != "" {
-		id := shortuuid.New()
 		handler.cache.Set(id, redirect, 0)
-		parm.Add("state", id)
-		// set state to cookie
-		setCookie(&w, os.Getenv("SPOTIFY_LOGIN_STATE_KEY"), id)
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -127,20 +125,34 @@ func (handler Handler) redirectToSpotifyLogin(w http.ResponseWriter, r *http.Req
 }
 
 // verify jwt token and extract email from token
-func verifyToken(token string) (*jwt.MapClaims, error) {
-	tokenClaims := jwt.MapClaims{}
-	_, err := jwt.ParseWithClaims(token, tokenClaims, func(token *jwt.Token) (interface{}, error) {
+func verifyToken(tokenString string) (*spotify.CustomClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &spotify.CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(os.Getenv("SECRET")), nil
 	})
-	return &tokenClaims, err
+	if err != nil {
+		return nil, err
+	}
+	if claims, ok := token.Claims.(*spotify.CustomClaims); ok && token.Valid {
+		return claims, nil
+	} else {
+		return nil, errors.New("invalid token")
+	}
 }
 
-func (handler *Handler) login() http.Handler {
+// login
+func (handler Handler) login() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.redirectToSpotifyLogin(w, r)
+	})
+}
+
+func (handler *Handler) getProfile() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		email := r.Header.Get("email")
 		profile, profileErr := handler.services.Auth.Login(email)
 		if profile == nil {
-			handler.redirectToSpotifyLogin(w, r)
+			http.Error(w, "no profile", http.StatusInternalServerError)
+			return
 		}
 		if profileErr != nil {
 			http.Error(w, profileErr.Error(), http.StatusInternalServerError)
@@ -172,17 +184,9 @@ func (handler *Handler) loginCallback() http.Handler {
 				return
 			}
 			// get redirect from cache with key from state
-			redirect, err := handler.cache.Get(state)
-			if redirect == nil {
-				http.Error(w, "Invalid state", http.StatusForbidden)
-				return
-			}
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if redirect == "" {
-				http.Redirect(w, r, "/api/v1/spotify/login?token="+loginReponse.Token, http.StatusTemporaryRedirect)
+			redirect, _ := handler.cache.Get(state)
+			if redirect == "" || redirect == nil {
+				http.Redirect(w, r, "/api/v1/spotify/profile?token="+loginReponse.Token, http.StatusTemporaryRedirect)
 			} else {
 				redirect, ok := redirect.(string)
 				if !ok {
@@ -190,7 +194,7 @@ func (handler *Handler) loginCallback() http.Handler {
 					return
 				}
 				http.Redirect(w, r, redirect+"?token="+loginReponse.Token, http.StatusTemporaryRedirect)
-				handler.cache.Clear(state)
+				err := handler.cache.Clear(state)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
@@ -249,7 +253,7 @@ func (handler *Handler) getAudioFeatures() http.Handler {
 		email := r.Header.Get("email")
 		trackIDs := r.URL.Query().Get("ids")
 		trackIDsArray := strings.Split(trackIDs, ",")
-		resp, err := handler.services.PersonalInfo.GetTracksAudioFeatures(email, trackIDsArray)
+		resp, err := handler.services.General.GetTracksAudioFeatures(email, trackIDsArray)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
@@ -273,6 +277,43 @@ func (handler *Handler) getTops() http.Handler {
 		topType := r.URL.Query().Get("type")
 
 		resp, err := handler.services.PersonalInfo.GetTopArtistsOrTracks(email, topType, timeRange, limit, offset)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write(*resp)
+	})
+}
+
+// get personal audio features
+func (handler *Handler) getPersonalAudioFeatures() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := r.Header.Get("email")
+		// get timespan from query
+		timeSpan := r.URL.Query().Get("timespan")
+		resp, err := handler.services.PersonalInfo.GetPersonalAudioFeatures(email, timeSpan)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write(*resp)
+	})
+}
+
+// get playlists handler
+func (handler *Handler) getPlaylists() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := r.Header.Get("email")
+		limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+		if err != nil {
+			limit = 10
+		}
+		offset, err := strconv.Atoi(r.URL.Query().Get("offset"))
+		if err != nil {
+			offset = 0
+		}
+
+		resp, err := handler.services.PersonalInfo.GetUserPlaylists(email, limit, offset)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

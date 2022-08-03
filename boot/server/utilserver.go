@@ -15,10 +15,12 @@ import (
 )
 
 func init() {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatal(err)
-		log.Fatal("Error loading .env file")
+	// load env if development mode
+	if os.Getenv("ENV") == "development" {
+		err := godotenv.Load()
+		if err != nil {
+			log.Fatal("Error loading .env file")
+		}
 	}
 }
 
@@ -36,10 +38,10 @@ func main() {
 
 	router := endpoint.NewHandler(cache, Services)
 
-	fmt.Printf("Starting server at port 8090\n")
+	fmt.Printf("Starting server at port %s\n", os.Getenv("PORT"))
 	// allow CORS and start listening
 	headersOk := handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type", "Authorization"})
 	originsOk := handlers.AllowedOrigins([]string{"*"})
 	methodsOk := handlers.AllowedMethods([]string{"GET", "HEAD", "POST", "PUT", "OPTIONS"})
-	log.Fatal(http.ListenAndServe(":8090", handlers.CORS(originsOk, headersOk, methodsOk)(router)))
+	log.Fatal(http.ListenAndServe(":"+os.Getenv("PORT"), handlers.CORS(originsOk, headersOk, methodsOk)(router)))
 }

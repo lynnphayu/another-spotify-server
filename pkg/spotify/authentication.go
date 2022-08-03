@@ -44,7 +44,7 @@ func (service *Service) GetCredentials(authorizationCode string) (*Credentials, 
 	return &credentials, nil
 }
 
-func (service *Service) GetProfile(accessToken string) (*Profile, error) {
+func (service *Service) GetProfileFromSpotify(accessToken string) (*Profile, error) {
 	profileResp, err := service.httpClient.Request(
 		"GET",
 		os.Getenv("SPOTIFY_PROFILE_URL"), nil,
@@ -75,7 +75,7 @@ func (service *Service) AuthCallback(authorizationCode string) (*LoginResponse, 
 		return nil, err
 	}
 
-	profile, err := service.GetProfile(credentials.AccessToken)
+	profile, err := service.GetProfileFromSpotify(credentials.AccessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +85,11 @@ func (service *Service) AuthCallback(authorizationCode string) (*LoginResponse, 
 	if createError != nil {
 		return nil, createError
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"email": profile.Email,
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, CustomClaims{
+		profile.Email,
+		jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute * 1)),
+		},
 	})
 	tokenString, signedErr := token.SignedString([]byte(os.Getenv("SECRET")))
 

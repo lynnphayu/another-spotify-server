@@ -3,7 +3,16 @@ package spotify
 import (
 	"net/http"
 	"time"
+
+	"github.com/golang-jwt/jwt/v4"
 )
+
+type CustomClaims struct {
+	Email string `json:"email"`
+	jwt.RegisteredClaims
+}
+
+// Create the Claims
 
 type Storage interface {
 	CreateOrUpdateProfile(profile Profile) (*Profile, error)
@@ -29,6 +38,7 @@ type LoginResponse struct {
 type Services struct {
 	Auth         AuthService
 	PersonalInfo PersonalInfoService
+	General      GeneralService
 }
 
 // AuthService - functions implemented
@@ -37,13 +47,18 @@ type AuthService interface {
 	AuthCallback(authorizationCode string) (*LoginResponse, error)
 	GetCredentials(authorizationCode string) (*Credentials, error)
 	GetValidToken(email string) (*Credentials, error)
+	GetProfileFromSpotify(accessToken string) (*Profile, error)
 }
 
 type PersonalInfoService interface {
-	GetProfile(accessToken string) (*Profile, error)
 	GetRecentlyPlayed(email string, limit int, before string, after string) (*[]byte, error)
-	GetTracksAudioFeatures(email string, trackIDs []string) (*[]byte, error)
+	GetPersonalAudioFeatures(email string, timespan string) (*[]byte, error)
 	GetTopArtistsOrTracks(email string, top string, timeRange string, limit int, offset int) (*[]byte, error)
+	GetUserPlaylists(email string, limit int, offset int) (*[]byte, error)
+}
+
+type GeneralService interface {
+	GetTracksAudioFeatures(email string, trackIDs []string) (*[]byte, error)
 }
 
 type Service struct {
@@ -57,5 +72,6 @@ func NewServices(storage Storage, httpClient HTTPClient, cache Cache) Services {
 	return Services{
 		Auth:         &Service{storage, httpClient, cache},
 		PersonalInfo: &Service{storage, httpClient, cache},
+		General:      &Service{storage, httpClient, cache},
 	}
 }
